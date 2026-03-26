@@ -1,0 +1,19 @@
+# Binary
+yai
+/cmd/yai/yai
+
+# Config with secrets
+yai.yaml
+!yai.example.yaml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+coverage.out
