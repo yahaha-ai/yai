@@ -1,6 +1,5 @@
 # Binary
-yai
-/cmd/yai/yai
+/yai
 
 # Config with secrets
 yai.yaml
