@@ -31,26 +31,43 @@ func New(providers []config.ProviderConfig) *Proxy {
 		if err != nil {
 			continue
 		}
-		rp := &httputil.ReverseProxy{
-			Director: makeDirector(target),
-			// FlushInterval -1 means flush immediately — critical for SSE streaming
-			FlushInterval: -1,
-		}
-		p.providers[cfg.Name] = &providerProxy{
+		pp := &providerProxy{
 			config: cfg,
 			target: target,
-			proxy:  rp,
 		}
+		rp := &httputil.ReverseProxy{
+			Director:      pp.director,
+			FlushInterval: -1,
+		}
+		pp.proxy = rp
+		p.providers[cfg.Name] = pp
 	}
 	return p
 }
 
-func makeDirector(target *url.URL) func(*http.Request) {
-	return func(req *http.Request) {
-		req.URL.Scheme = target.Scheme
-		req.URL.Host = target.Host
-		req.Host = target.Host
-		// Path is already stripped of /proxy/{provider} prefix by ServeHTTP
+// director rewrites the request: sets target host/scheme, strips client auth, injects real key.
+func (pp *providerProxy) director(req *http.Request) {
+	req.URL.Scheme = pp.target.Scheme
+	req.URL.Host = pp.target.Host
+	req.Host = pp.target.Host
+
+	// Strip client's auth headers
+	req.Header.Del("Authorization")
+	req.Header.Del("X-Api-Key")
+
+	// Inject real credentials based on auth type
+	switch pp.config.Auth.Type {
+	case "bearer":
+		req.Header.Set("Authorization", "Bearer "+pp.config.Auth.Key)
+	case "x-api-key":
+		req.Header.Set("X-Api-Key", pp.config.Auth.Key)
+	case "none":
+		// no auth header
+	}
+
+	// Inject extra headers (e.g., anthropic-version)
+	for k, v := range pp.config.ExtraHeaders {
+		req.Header.Set(k, v)
 	}
 }
 
