@@ -15,6 +15,7 @@ import (
 	"github.com/yahaha-ai/yai/internal/health"
 	"github.com/yahaha-ai/yai/internal/proxy"
 	"github.com/yahaha-ai/yai/internal/ratelimit"
+	"github.com/yahaha-ai/yai/internal/telemetry"
 )
 
 // Server wraps the HTTP mux with hot-reloadable components.
@@ -22,7 +23,8 @@ type Server struct {
 	configPath string
 	handler    atomic.Value // stores *liveHandler
 	checker    *health.Checker
-	mu         sync.Mutex // serializes reloads
+	otel       *telemetry.Provider // nil if telemetry disabled
+	mu         sync.Mutex          // serializes reloads
 }
 
 // liveHandler holds a snapshot of all hot-reloadable components.
@@ -32,8 +34,9 @@ type liveHandler struct {
 }
 
 // New creates a Server. The initial config must be valid (caller handles errors).
-func New(configPath string, cfg *config.Config) (*Server, error) {
-	s := &Server{configPath: configPath}
+// otelProvider can be nil if telemetry is disabled.
+func New(configPath string, cfg *config.Config, otelProvider *telemetry.Provider) (*Server, error) {
+	s := &Server{configPath: configPath, otel: otelProvider}
 	if err := s.load(cfg); err != nil {
 		return nil, err
 	}
@@ -54,7 +57,12 @@ func (s *Server) load(cfg *config.Config) error {
 	s.checker = checker
 
 	handler := fallback.New(p, checker, cfg.Fallback.Groups)
-	authHandler := auth.Middleware(tokenMap, handler)
+
+	// Wrap with telemetry middleware (no-op if otel is nil)
+	var proxyHandler http.Handler = handler
+	proxyHandler = telemetry.Middleware(s.otel, proxyHandler)
+
+	authHandler := auth.Middleware(tokenMap, proxyHandler)
 
 	s.handler.Store(&liveHandler{
 		authHandler: authHandler,

@@ -300,7 +300,7 @@ providers:
 	}
 
 	// Create server
-	srv, err := server.New(tmpFile.Name(), cfg)
+	srv, err := server.New(tmpFile.Name(), cfg, nil)
 	if err != nil {
 		t.Fatalf("server init: %v", err)
 	}
@@ -421,7 +421,7 @@ providers:
 		t.Fatalf("parse error: %v", err)
 	}
 
-	srv, err := server.New(tmpFile.Name(), cfg)
+	srv, err := server.New(tmpFile.Name(), cfg, nil)
 	if err != nil {
 		t.Fatalf("server init: %v", err)
 	}

@@ -102,11 +102,18 @@ type FallbackConfig struct {
 	Groups []FallbackGroup `yaml:"groups"`
 }
 
+type TelemetryConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	Endpoint    string `yaml:"endpoint"`     // OTLP HTTP endpoint, e.g. "http://localhost:4318"
+	ServiceName string `yaml:"service_name"` // default: "yai"
+}
+
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Auth     AuthConfig     `yaml:"auth"`
+	Server    ServerConfig     `yaml:"server"`
+	Auth      AuthConfig       `yaml:"auth"`
 	Providers []ProviderConfig `yaml:"providers"`
-	Fallback FallbackConfig `yaml:"fallback"`
+	Fallback  FallbackConfig   `yaml:"fallback"`
+	Telemetry TelemetryConfig  `yaml:"telemetry"`
 }
 
 // Parse reads YAML from r and returns a validated Config.
