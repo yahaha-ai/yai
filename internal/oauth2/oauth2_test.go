@@ -557,3 +557,89 @@ func TestServiceAccount_DefaultTokenURI(t *testing.T) {
 func base64RawURLDecode(s string) ([]byte, error) {
 	return base64.RawURLEncoding.DecodeString(s)
 }
+
+func TestClientCredentials_WithScopes(t *testing.T) {
+	var receivedScope string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		receivedScope = r.FormValue("scope")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"access_token": "scoped-token",
+			"expires_in":   3600,
+		})
+	}))
+	defer server.Close()
+
+	src := NewClientCredentialsSource(ClientCredentialsConfig{
+		TokenURL:     server.URL,
+		ClientID:     "id",
+		ClientSecret: "secret",
+		Scopes:       []string{"https://cognitiveservices.azure.com/.default"},
+	})
+
+	tok, err := src.Token()
+	if err != nil {
+		t.Fatalf("Token() error: %v", err)
+	}
+	if tok.AccessToken != "scoped-token" {
+		t.Errorf("AccessToken = %q", tok.AccessToken)
+	}
+	if receivedScope != "https://cognitiveservices.azure.com/.default" {
+		t.Errorf("scope = %q, want %q", receivedScope, "https://cognitiveservices.azure.com/.default")
+	}
+}
+
+func TestClientCredentials_WithMultipleScopes(t *testing.T) {
+	var receivedScope string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		receivedScope = r.FormValue("scope")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"access_token": "multi-scope-token",
+			"expires_in":   3600,
+		})
+	}))
+	defer server.Close()
+
+	src := NewClientCredentialsSource(ClientCredentialsConfig{
+		TokenURL:     server.URL,
+		ClientID:     "id",
+		ClientSecret: "secret",
+		Scopes:       []string{"scope1", "scope2", "scope3"},
+	})
+
+	src.Token()
+
+	if receivedScope != "scope1 scope2 scope3" {
+		t.Errorf("scope = %q, want %q", receivedScope, "scope1 scope2 scope3")
+	}
+}
+
+func TestClientCredentials_WithoutScopes_NoScopeParam(t *testing.T) {
+	var hasScopeParam bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		_, hasScopeParam = r.Form["scope"]
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"access_token": "no-scope-token",
+			"expires_in":   3600,
+		})
+	}))
+	defer server.Close()
+
+	src := NewClientCredentialsSource(ClientCredentialsConfig{
+		TokenURL:     server.URL,
+		ClientID:     "id",
+		ClientSecret: "secret",
+		// No Scopes
+	})
+
+	src.Token()
+
+	if hasScopeParam {
+		t.Error("scope param should not be sent when Scopes is empty")
+	}
+}

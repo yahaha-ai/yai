@@ -97,6 +97,20 @@ func createTokenSource(cfg config.ProviderConfig) (TokenSource, error) {
 			TokenURL:     cfg.Auth.TokenURL,
 			ClientID:     cfg.Auth.ClientID,
 			ClientSecret: cfg.Auth.ClientSecret,
+			Scopes:       cfg.Auth.Scopes,
+		}), nil
+
+	case "oauth2-azure-ad":
+		tokenURL := fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/token", cfg.Auth.TenantID)
+		scopes := cfg.Auth.Scopes
+		if len(scopes) == 0 {
+			scopes = []string{"https://cognitiveservices.azure.com/.default"}
+		}
+		return oauth2.NewClientCredentialsSource(oauth2.ClientCredentialsConfig{
+			TokenURL:     tokenURL,
+			ClientID:     cfg.Auth.ClientID,
+			ClientSecret: cfg.Auth.ClientSecret,
+			Scopes:       scopes,
 		}), nil
 
 	case "oauth2-service-account":
@@ -138,7 +152,7 @@ func (pp *providerProxy) director(req *http.Request) {
 		q := req.URL.Query()
 		q.Set(pp.config.Auth.ParamName, pp.config.Auth.Key)
 		req.URL.RawQuery = q.Encode()
-	case "oauth2-client-credentials", "oauth2-service-account":
+	case "oauth2-client-credentials", "oauth2-service-account", "oauth2-azure-ad":
 		if pp.tokenSource != nil {
 			token, err := pp.tokenSource.Token()
 			if err != nil {
@@ -193,5 +207,5 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }

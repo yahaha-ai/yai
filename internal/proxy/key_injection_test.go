@@ -477,3 +477,88 @@ func TestKeyInjection_OAuth2TokenError(t *testing.T) {
 		t.Errorf("Authorization should not be set when token refresh fails, got %q", hc.Get("Authorization"))
 	}
 }
+
+func TestKeyInjection_OAuth2AzureAD(t *testing.T) {
+	hc := newHeaderCaptureServer()
+	defer hc.Server.Close()
+
+	providers := []config.ProviderConfig{
+		{
+			Name:     "azure-openai",
+			Upstream: hc.Server.URL,
+			Auth: config.ProviderAuth{
+				Type:         "oauth2-azure-ad",
+				TenantID:     "my-tenant-id",
+				ClientID:     "my-client-id",
+				ClientSecret: "my-client-secret",
+			},
+		},
+	}
+
+	ts := &staticTokenSource{
+		token: &oauth2.Token{
+			AccessToken: "azure-ad-token-789",
+			ExpiresAt:   time.Now().Add(time.Hour),
+		},
+	}
+
+	p := New(providers, WithTokenSource("azure-openai", ts))
+	req := httptest.NewRequest("POST", "/proxy/azure-openai/openai/deployments/gpt-4o/chat/completions?api-version=2024-08-01-preview", strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer yai_xxx")
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != 200 {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	if got := hc.Get("Authorization"); got != "Bearer azure-ad-token-789" {
+		t.Errorf("Authorization = %q, want %q", got, "Bearer azure-ad-token-789")
+	}
+}
+
+func TestCreateTokenSource_AzureAD_DefaultScope(t *testing.T) {
+	// Verify createTokenSource builds the correct URL and defaults
+	cfg := config.ProviderConfig{
+		Name:     "azure",
+		Upstream: "https://myinstance.openai.azure.com",
+		Auth: config.ProviderAuth{
+			Type:         "oauth2-azure-ad",
+			TenantID:     "00001111-aaaa-2222",
+			ClientID:     "client-id",
+			ClientSecret: "client-secret",
+			// No scopes — should default
+		},
+	}
+
+	ts, err := createTokenSource(cfg)
+	if err != nil {
+		t.Fatalf("createTokenSource error: %v", err)
+	}
+	if ts == nil {
+		t.Fatal("expected non-nil TokenSource")
+	}
+	// We can't easily inspect the internal state, but at least verify it was created
+}
+
+func TestCreateTokenSource_AzureAD_CustomScope(t *testing.T) {
+	cfg := config.ProviderConfig{
+		Name:     "azure",
+		Upstream: "https://myinstance.openai.azure.com",
+		Auth: config.ProviderAuth{
+			Type:         "oauth2-azure-ad",
+			TenantID:     "my-tenant",
+			ClientID:     "client-id",
+			ClientSecret: "client-secret",
+			Scopes:       []string{"https://custom.scope/.default"},
+		},
+	}
+
+	ts, err := createTokenSource(cfg)
+	if err != nil {
+		t.Fatalf("createTokenSource error: %v", err)
+	}
+	if ts == nil {
+		t.Fatal("expected non-nil TokenSource")
+	}
+}

@@ -87,6 +87,22 @@ providers:
   #     interval: 60s
   #     timeout: 5s
 
+  # Azure OpenAI — uses Azure AD client credentials
+  # - name: azure-openai
+  #   upstream: https://your-instance.openai.azure.com
+  #   auth:
+  #     type: oauth2-azure-ad
+  #     tenant_id: 00001111-aaaa-2222-bbbb-3333cccc4444
+  #     client_id: your-app-client-id
+  #     client_secret: your-app-client-secret
+  #     # scopes:  # optional, defaults to https://cognitiveservices.azure.com/.default
+  #     #   - https://cognitiveservices.azure.com/.default
+  #   health_check:
+  #     method: GET
+  #     path: /openai/models?api-version=2024-08-01-preview
+  #     interval: 60s
+  #     timeout: 5s
+
 fallback:
   groups:
     - name: openai-compat

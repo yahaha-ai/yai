@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,6 +38,7 @@ type ClientCredentialsConfig struct {
 	TokenURL     string // e.g. "https://aip.baidubce.com/oauth/2.0/token"
 	ClientID     string
 	ClientSecret string
+	Scopes       []string // optional; if set, sent as space-joined "scope" param (required by Azure AD)
 	HTTPClient   *http.Client // optional, defaults to http.DefaultClient
 }
 
@@ -75,6 +77,9 @@ func (s *clientCredentialsSource) refresh() (*Token, error) {
 		"grant_type":    {"client_credentials"},
 		"client_id":     {s.cfg.ClientID},
 		"client_secret": {s.cfg.ClientSecret},
+	}
+	if len(s.cfg.Scopes) > 0 {
+		data.Set("scope", joinScopes(s.cfg.Scopes))
 	}
 
 	resp, err := s.cfg.HTTPClient.PostForm(s.cfg.TokenURL, data)
@@ -235,6 +240,10 @@ func (s *serviceAccountSource) refresh() (*Token, error) {
 		AccessToken: tokenResp.AccessToken,
 		ExpiresAt:   expiresAt,
 	}, nil
+}
+
+func joinScopes(scopes []string) string {
+	return strings.Join(scopes, " ")
 }
 
 func parseRSAPrivateKey(pemStr string) (*rsa.PrivateKey, error) {

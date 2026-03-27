@@ -118,11 +118,11 @@ func copyRecorder(w http.ResponseWriter, rec *httptest.ResponseRecorder) {
 		w.Header()[k] = v
 	}
 	w.WriteHeader(rec.Code)
-	w.Write(rec.Body.Bytes())
+	_, _ = w.Write(rec.Body.Bytes())
 }
 
 func writeError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }

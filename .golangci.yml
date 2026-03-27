@@ -1,0 +1,14 @@
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+issues:
+  exclude-rules:
+    # Test files: allow unchecked errors on common test helper patterns
+    - path: _test\.go
+      linters:
+        - errcheck
