@@ -46,8 +46,8 @@ func buildServer(t *testing.T) (*httptest.Server, func()) {
 		},
 	}
 
-	tokenMap := map[string]string{
-		"yai_test_token": "test-client",
+	tokenMap := map[string]auth.TokenInfo{
+		"yai_test_token": {Name: "test-client"},
 	}
 
 	p := proxy.New(providers)
@@ -207,7 +207,7 @@ func TestIntegration_SSEStreaming(t *testing.T) {
 			},
 		},
 	}
-	tokenMap := map[string]string{"yai_test": "test"}
+	tokenMap := map[string]auth.TokenInfo{"yai_test": {Name: "test"}}
 
 	p := proxy.New(providers)
 	checker := health.New(providers)

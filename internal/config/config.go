@@ -38,8 +38,9 @@ type ServerConfig struct {
 }
 
 type TokenEntry struct {
-	Name  string `yaml:"name"`
-	Token string `yaml:"token"`
+	Name      string `yaml:"name"`
+	Token     string `yaml:"token"`
+	RateLimit string `yaml:"rate_limit"` // e.g. "60/min", "1000/hour"
 }
 
 type AuthConfig struct {

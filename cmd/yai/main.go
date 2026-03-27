@@ -13,6 +13,7 @@ import (
 	"github.com/yahaha-ai/yai/internal/fallback"
 	"github.com/yahaha-ai/yai/internal/health"
 	"github.com/yahaha-ai/yai/internal/proxy"
+	"github.com/yahaha-ai/yai/internal/ratelimit"
 )
 
 func main() {
@@ -30,10 +31,18 @@ func main() {
 		log.Fatalf("failed to parse config: %v", err)
 	}
 
-	// Build token map for auth
-	tokenMap := make(map[string]string)
+	// Build token map for auth (with optional rate limiters)
+	tokenMap := make(map[string]auth.TokenInfo)
 	for _, tok := range cfg.Auth.Tokens {
-		tokenMap[tok.Token] = tok.Name
+		info := auth.TokenInfo{Name: tok.Name}
+		if tok.RateLimit != "" {
+			limit, err := ratelimit.ParseLimit(tok.RateLimit)
+			if err != nil {
+				log.Fatalf("auth token %q: invalid rate_limit: %v", tok.Name, err)
+			}
+			info.Limiter = ratelimit.NewLimiter(limit)
+		}
+		tokenMap[tok.Token] = info
 	}
 
 	// Initialize components
