@@ -61,6 +61,10 @@ func (pp *providerProxy) director(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer "+pp.config.Auth.Key)
 	case "x-api-key":
 		req.Header.Set("X-Api-Key", pp.config.Auth.Key)
+	case "query-param":
+		q := req.URL.Query()
+		q.Set(pp.config.Auth.ParamName, pp.config.Auth.Key)
+		req.URL.RawQuery = q.Encode()
 	case "none":
 		// no auth header
 	}

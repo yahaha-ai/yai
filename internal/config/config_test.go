@@ -298,3 +298,55 @@ providers:
 		t.Errorf("default health_check timeout = %v, want 5s", hc.Timeout)
 	}
 }
+
+func TestValidate_QueryParamAuth(t *testing.T) {
+	yaml := `
+server:
+  port: 8080
+auth:
+  tokens:
+    - name: test
+      token: yai_xxx
+providers:
+  - name: gemini
+    upstream: https://generativelanguage.googleapis.com
+    auth:
+      type: query-param
+      key: AIzaSyXXXXXXXXXXXXXXXXX
+      param_name: key
+`
+	cfg, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Providers[0].Auth.Type != "query-param" {
+		t.Errorf("auth type = %q, want query-param", cfg.Providers[0].Auth.Type)
+	}
+	if cfg.Providers[0].Auth.ParamName != "key" {
+		t.Errorf("param_name = %q, want key", cfg.Providers[0].Auth.ParamName)
+	}
+}
+
+func TestValidate_QueryParamMissingParamName(t *testing.T) {
+	yaml := `
+server:
+  port: 8080
+auth:
+  tokens:
+    - name: test
+      token: yai_xxx
+providers:
+  - name: gemini
+    upstream: https://generativelanguage.googleapis.com
+    auth:
+      type: query-param
+      key: AIzaSyXXXXXXXXXXXXXXXXX
+`
+	_, err := Parse(strings.NewReader(yaml))
+	if err == nil {
+		t.Fatal("expected error for query-param without param_name")
+	}
+	if !strings.Contains(err.Error(), "param_name") {
+		t.Errorf("error = %q, want mention of param_name", err.Error())
+	}
+}
