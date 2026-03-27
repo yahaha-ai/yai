@@ -17,9 +17,15 @@ A lightweight reverse proxy for LLM APIs with multi-provider fallback, health ch
 ## Quick Start
 
 ```bash
+# From source
 go build ./cmd/yai/
 cp yai.example.yaml yai.yaml   # edit with your real keys
 ./yai -config yai.yaml
+
+# Docker
+cp yai.example.yaml yai.yaml   # edit with your real keys
+echo "YAI_AUTH_TOKEN=yai_xxx" > .env
+docker compose up -d
 ```
 
 ## Usage

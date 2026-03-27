@@ -1,0 +1,11 @@
+.git
+.github
+.gitignore
+.golangci.yml
+*.md
+*.yaml
+!go.mod
+!go.sum
+LICENSE
+coverage.out
+yai
