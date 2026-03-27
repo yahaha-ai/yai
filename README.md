@@ -57,6 +57,42 @@ curl http://localhost:8080/proxy/deepseek/v1/chat/completions \
 
 See [yai.example.yaml](yai.example.yaml) for a full example with all auth types.
 
+### Environment Variable Expansion
+
+Keep secrets out of config files using `${VAR}` or `${VAR:-default}`:
+
+```yaml
+auth:
+  tokens:
+    - name: main
+      token: ${YAI_AUTH_TOKEN}
+
+providers:
+  - name: anthropic
+    auth:
+      type: x-api-key
+      key: ${YAI_ANTHROPIC_KEY}
+```
+
+```bash
+export YAI_AUTH_TOKEN=yai_xxx
+export YAI_ANTHROPIC_KEY=sk-ant-xxx
+./yai -config yai.yaml
+```
+
+Or with systemd:
+
+```ini
+# /etc/yai/env
+YAI_AUTH_TOKEN=yai_xxx
+YAI_ANTHROPIC_KEY=sk-ant-xxx
+
+# /etc/systemd/system/yai.service
+[Service]
+EnvironmentFile=/etc/yai/env
+ExecStart=/usr/local/bin/yai -config /etc/yai/yai.yaml
+```
+
 ## Architecture
 
 ```

@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"io"
+	"os"
+	"regexp"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -95,10 +97,17 @@ type Config struct {
 }
 
 // Parse reads YAML from r and returns a validated Config.
+// Environment variables in the form ${VAR} or ${VAR:-default} are expanded
+// before parsing.
 func Parse(r io.Reader) (*Config, error) {
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+	expanded := expandEnv(string(raw))
+
 	var cfg Config
-	dec := yaml.NewDecoder(r)
-	if err := dec.Decode(&cfg); err != nil {
+	if err := yaml.Unmarshal([]byte(expanded), &cfg); err != nil {
 		return nil, fmt.Errorf("yaml decode: %w", err)
 	}
 	applyDefaults(&cfg)
@@ -106,6 +115,26 @@ func Parse(r io.Reader) (*Config, error) {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+// envPattern matches ${VAR} and ${VAR:-default}.
+var envPattern = regexp.MustCompile(`\$\{([a-zA-Z_][a-zA-Z0-9_]*)(?::-([^}]*))?\}`)
+
+// expandEnv replaces ${VAR} with os.Getenv("VAR").
+// ${VAR:-default} uses "default" if VAR is unset or empty.
+func expandEnv(s string) string {
+	return envPattern.ReplaceAllStringFunc(s, func(match string) string {
+		parts := envPattern.FindStringSubmatch(match)
+		if parts == nil {
+			return match
+		}
+		name := parts[1]
+		fallback := parts[2]
+		if val := os.Getenv(name); val != "" {
+			return val
+		}
+		return fallback
+	})
 }
 
 func applyDefaults(cfg *Config) {
