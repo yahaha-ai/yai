@@ -181,9 +181,10 @@ func (pp *providerProxy) director(req *http.Request) {
 	req.URL.Host = pp.target.Host
 	req.Host = pp.target.Host
 
-	// Strip client's auth headers
+	// Strip client's auth headers and internal headers
 	req.Header.Del("Authorization")
 	req.Header.Del("X-Api-Key")
+	req.Header.Del("X-Yai-Token-Name")
 
 	// Inject real credentials based on auth type
 	switch pp.config.Auth.Type {

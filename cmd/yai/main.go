@@ -13,6 +13,7 @@ import (
 
 	"github.com/yahaha-ai/yai/internal/config"
 	"github.com/yahaha-ai/yai/internal/server"
+	"github.com/yahaha-ai/yai/internal/telemetry"
 )
 
 // Set by goreleaser ldflags
@@ -43,18 +44,27 @@ func main() {
 		log.Fatalf("failed to parse config: %v", err)
 	}
 
+	// Initialize OpenTelemetry (nil if disabled)
+	otelProvider, err := telemetry.New(context.Background(), cfg.Telemetry)
+	if err != nil {
+		log.Fatalf("failed to initialize telemetry: %v", err)
+	}
+
 	// Initialize server with hot-reloadable components
-	srv, err := server.New(*configPath, cfg)
+	srv, err := server.New(*configPath, cfg, otelProvider)
 	if err != nil {
 		log.Fatalf("failed to initialize server: %v", err)
 	}
 	defer srv.Stop()
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	log.Printf("yai listening on %s", addr)
+	log.Printf("yai %s listening on %s", version, addr)
 	log.Printf("  providers: %d", len(cfg.Providers))
 	log.Printf("  fallback groups: %d", len(cfg.Fallback.Groups))
 	log.Printf("  auth tokens: %d", len(cfg.Auth.Tokens))
+	if cfg.Telemetry.Enabled {
+		log.Printf("  telemetry: %s → %s", cfg.Telemetry.ServiceName, cfg.Telemetry.Endpoint)
+	}
 
 	httpServer := &http.Server{
 		Addr:    addr,
@@ -86,6 +96,11 @@ func main() {
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), timeout)
 				defer cancel()
+
+				// Shutdown OTel (flush pending data)
+				if otelProvider != nil {
+					otelProvider.Shutdown(ctx)
+				}
 
 				if err := httpServer.Shutdown(ctx); err != nil {
 					log.Printf("shutdown error: %v", err)

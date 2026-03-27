@@ -58,6 +58,9 @@ func Middleware(tokens map[string]TokenInfo, next http.Handler) http.Handler {
 			}
 		}
 
+		// Pass token name downstream for telemetry (internal header, stripped by proxy)
+		r.Header.Set("X-Yai-Token-Name", info.Name)
+
 		next.ServeHTTP(w, r)
 	})
 }

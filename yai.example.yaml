@@ -144,3 +144,11 @@ fallback:
       retry:
         max_attempts: 2
         timeout: 30s
+
+# OpenTelemetry (optional)
+# Export traces and metrics via OTLP HTTP. Point to any OTLP-compatible backend:
+# Jaeger, Grafana Tempo, Langfuse, etc.
+# telemetry:
+#   enabled: true
+#   endpoint: http://localhost:4318    # OTLP HTTP endpoint
+#   service_name: yai                  # default: "yai"
