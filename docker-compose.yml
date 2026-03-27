@@ -1,0 +1,11 @@
+services:
+  yai:
+    build: .
+    # image: ghcr.io/yahaha-ai/yai:latest  # or use pre-built image
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./yai.yaml:/etc/yai/yai.yaml:ro
+    env_file:
+      - .env  # YAI_AUTH_TOKEN, YAI_ANTHROPIC_KEY, etc.
+    restart: unless-stopped
