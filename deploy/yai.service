@@ -1,0 +1,41 @@
+[Unit]
+Description=yai — unified LLM API proxy
+Documentation=https://github.com/yahaha-ai/yai
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yai
+Group=yai
+ExecStart=/usr/local/bin/yai -config /etc/yai/yai.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=-/etc/yai/env
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=yai
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadOnlyPaths=/etc/yai
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+MemoryDenyWriteExecute=true
+LockPersonality=true
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
