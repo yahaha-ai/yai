@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/yahaha-ai/yai/internal/awssign"
 	"github.com/yahaha-ai/yai/internal/config"
@@ -100,12 +102,28 @@ func New(providers []config.ProviderConfig, opts ...Option) *Proxy {
 			Director:      pp.director,
 			FlushInterval: -1,
 		}
+
+		// Per-provider transport with configured timeouts
+		transport := &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   cfg.Timeout.Connect.Duration,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			ResponseHeaderTimeout: cfg.Timeout.Read.Duration,
+			TLSHandshakeTimeout:   10 * time.Second,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   10,
+			IdleConnTimeout:       90 * time.Second,
+		}
+
 		// For AWS SigV4, wrap the transport to sign requests after director rewrites
 		if pp.awsSigner != nil {
 			rp.Transport = &awsSignTransport{
-				base:   http.DefaultTransport,
+				base:   transport,
 				signer: pp.awsSigner,
 			}
+		} else {
+			rp.Transport = transport
 		}
 		pp.proxy = rp
 		p.providers[cfg.Name] = pp
