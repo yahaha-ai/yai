@@ -793,3 +793,95 @@ func TestExpandEnvNoVars(t *testing.T) {
 		t.Errorf("got %q, want %q", result, input)
 	}
 }
+
+func TestValidate_AWSSigV4(t *testing.T) {
+	yaml := `
+server:
+  port: 8080
+auth:
+  tokens:
+    - name: test
+      token: yai_xxx
+providers:
+  - name: bedrock
+    upstream: https://bedrock-runtime.us-east-1.amazonaws.com
+    auth:
+      type: aws-sigv4
+      aws_region: us-east-1
+      aws_access_key: AKIAIOSFODNN7EXAMPLE
+      aws_secret_key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+`
+	cfg, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	a := cfg.Providers[0].Auth
+	if a.Type != "aws-sigv4" {
+		t.Errorf("type = %q", a.Type)
+	}
+	if a.AWSRegion != "us-east-1" {
+		t.Errorf("aws_region = %q", a.AWSRegion)
+	}
+	if a.AWSAccessKey != "AKIAIOSFODNN7EXAMPLE" {
+		t.Errorf("aws_access_key = %q", a.AWSAccessKey)
+	}
+	if a.AWSService != "" {
+		t.Errorf("aws_service should be empty (default applied elsewhere), got %q", a.AWSService)
+	}
+}
+
+func TestValidate_AWSSigV4MissingRegion(t *testing.T) {
+	yaml := `
+server:
+  port: 8080
+auth:
+  tokens:
+    - name: test
+      token: yai_xxx
+providers:
+  - name: bedrock
+    upstream: https://bedrock-runtime.us-east-1.amazonaws.com
+    auth:
+      type: aws-sigv4
+`
+	_, err := Parse(strings.NewReader(yaml))
+	if err == nil {
+		t.Fatal("expected error for missing aws_region")
+	}
+	if !strings.Contains(err.Error(), "aws_region") {
+		t.Fatalf("expected aws_region error, got: %v", err)
+	}
+}
+
+func TestValidate_AWSSigV4WithProfile(t *testing.T) {
+	yaml := `
+server:
+  port: 8080
+auth:
+  tokens:
+    - name: test
+      token: yai_xxx
+providers:
+  - name: bedrock
+    upstream: https://bedrock-runtime.us-east-1.amazonaws.com
+    auth:
+      type: aws-sigv4
+      aws_region: us-west-2
+      aws_profile: bedrock-prod
+      aws_service: bedrock
+`
+	cfg, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	a := cfg.Providers[0].Auth
+	if a.AWSProfile != "bedrock-prod" {
+		t.Errorf("aws_profile = %q", a.AWSProfile)
+	}
+	if a.AWSService != "bedrock" {
+		t.Errorf("aws_service = %q", a.AWSService)
+	}
+	if a.AWSRegion != "us-west-2" {
+		t.Errorf("aws_region = %q", a.AWSRegion)
+	}
+}

@@ -111,6 +111,26 @@ providers:
   #     interval: 60s
   #     timeout: 5s
 
+  # AWS Bedrock — uses AWS SigV4 signing
+  # - name: bedrock
+  #   upstream: https://bedrock-runtime.us-east-1.amazonaws.com
+  #   auth:
+  #     type: aws-sigv4
+  #     aws_region: us-east-1
+  #     # aws_service: bedrock  # default
+  #     # Option 1: static credentials
+  #     # aws_access_key: ${AWS_ACCESS_KEY_ID}
+  #     # aws_secret_key: ${AWS_SECRET_ACCESS_KEY}
+  #     # Option 2: named profile from ~/.aws/config
+  #     # aws_profile: bedrock-profile
+  #     # Option 3: omit all — uses default AWS credential chain
+  #     #   (env vars, ~/.aws/credentials, IAM role, etc.)
+  #   health_check:
+  #     method: GET
+  #     path: /
+  #     interval: 60s
+  #     timeout: 5s
+
 fallback:
   groups:
     - name: openai-compat

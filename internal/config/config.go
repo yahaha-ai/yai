@@ -47,7 +47,7 @@ type AuthConfig struct {
 }
 
 type ProviderAuth struct {
-	Type            string `yaml:"type"`             // "bearer", "x-api-key", "query-param", "oauth2-client-credentials", "oauth2-service-account", "oauth2-azure-ad", "none"
+	Type            string `yaml:"type"`             // "bearer", "x-api-key", "query-param", "oauth2-client-credentials", "oauth2-service-account", "oauth2-azure-ad", "aws-sigv4", "none"
 	Key             string `yaml:"key"`
 	ParamName       string `yaml:"param_name"`       // for query-param auth, e.g. "key"
 	TokenURL        string `yaml:"token_url"`        // for oauth2-client-credentials
@@ -56,6 +56,11 @@ type ProviderAuth struct {
 	CredentialsFile string `yaml:"credentials_file"` // for oauth2-service-account (GCP JSON path)
 	Scopes          []string `yaml:"scopes"`         // for oauth2-service-account, oauth2-azure-ad (optional)
 	TenantID        string `yaml:"tenant_id"`        // for oauth2-azure-ad
+	AWSRegion       string `yaml:"aws_region"`       // for aws-sigv4
+	AWSService      string `yaml:"aws_service"`      // for aws-sigv4 (default: "bedrock")
+	AWSAccessKey    string `yaml:"aws_access_key"`   // for aws-sigv4 (optional, falls back to default chain)
+	AWSSecretKey    string `yaml:"aws_secret_key"`   // for aws-sigv4 (optional, falls back to default chain)
+	AWSProfile      string `yaml:"aws_profile"`      // for aws-sigv4 (optional, AWS config profile)
 }
 
 type HealthCheckConfig struct {
@@ -162,6 +167,7 @@ var validAuthTypes = map[string]bool{
 	"oauth2-client-credentials":  true,
 	"oauth2-service-account":     true,
 	"oauth2-azure-ad":            true,
+	"aws-sigv4":                  true,
 	"none":                       true,
 }
 
@@ -187,7 +193,7 @@ func validate(cfg *Config) error {
 			return fmt.Errorf("providers[%d] %q: upstream is required", i, p.Name)
 		}
 		if !validAuthTypes[p.Auth.Type] {
-			return fmt.Errorf("providers[%d] %q: invalid auth type %q (valid: bearer, x-api-key, query-param, oauth2-client-credentials, oauth2-service-account, oauth2-azure-ad, none)", i, p.Name, p.Auth.Type)
+			return fmt.Errorf("providers[%d] %q: invalid auth type %q (valid: bearer, x-api-key, query-param, oauth2-client-credentials, oauth2-service-account, oauth2-azure-ad, aws-sigv4, none)", i, p.Name, p.Auth.Type)
 		}
 		if p.Auth.Type == "query-param" && p.Auth.ParamName == "" {
 			return fmt.Errorf("providers[%d] %q: auth type query-param requires param_name", i, p.Name)
@@ -217,6 +223,11 @@ func validate(cfg *Config) error {
 		if p.Auth.Type == "oauth2-service-account" {
 			if p.Auth.CredentialsFile == "" {
 				return fmt.Errorf("providers[%d] %q: auth type oauth2-service-account requires credentials_file", i, p.Name)
+			}
+		}
+		if p.Auth.Type == "aws-sigv4" {
+			if p.Auth.AWSRegion == "" {
+				return fmt.Errorf("providers[%d] %q: auth type aws-sigv4 requires aws_region", i, p.Name)
 			}
 		}
 		providerNames[p.Name] = true

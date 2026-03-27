@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/yahaha-ai/yai/internal/awssign"
 	"github.com/yahaha-ai/yai/internal/config"
 	"github.com/yahaha-ai/yai/internal/oauth2"
 )
@@ -26,7 +27,8 @@ type providerProxy struct {
 	config      config.ProviderConfig
 	target      *url.URL
 	proxy       *httputil.ReverseProxy
-	tokenSource TokenSource // non-nil for oauth2 auth types
+	tokenSource TokenSource  // non-nil for oauth2 auth types
+	awsSigner   *awssign.Signer // non-nil for aws-sigv4 auth type
 }
 
 // Option configures Proxy creation.
@@ -78,9 +80,32 @@ func New(providers []config.ProviderConfig, opts ...Option) *Proxy {
 			pp.tokenSource = ts // may be nil for non-oauth2 types
 		}
 
+		// Set up AWS SigV4 signer
+		if cfg.Auth.Type == "aws-sigv4" {
+			signer, err := awssign.NewSigner(awssign.Config{
+				AccessKeyID:     cfg.Auth.AWSAccessKey,
+				SecretAccessKey: cfg.Auth.AWSSecretKey,
+				Region:          cfg.Auth.AWSRegion,
+				Service:         cfg.Auth.AWSService,
+				Profile:         cfg.Auth.AWSProfile,
+			})
+			if err != nil {
+				log.Printf("WARN: provider %q: failed to create AWS signer: %v", cfg.Name, err)
+				continue
+			}
+			pp.awsSigner = signer
+		}
+
 		rp := &httputil.ReverseProxy{
 			Director:      pp.director,
 			FlushInterval: -1,
+		}
+		// For AWS SigV4, wrap the transport to sign requests after director rewrites
+		if pp.awsSigner != nil {
+			rp.Transport = &awsSignTransport{
+				base:   http.DefaultTransport,
+				signer: pp.awsSigner,
+			}
 		}
 		pp.proxy = rp
 		p.providers[cfg.Name] = pp
@@ -162,6 +187,8 @@ func (pp *providerProxy) director(req *http.Request) {
 				req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 			}
 		}
+	case "aws-sigv4":
+		// Signing is handled by awsSignTransport after URL rewrite
 	case "none":
 		// no auth header
 	}
@@ -208,4 +235,19 @@ func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// awsSignTransport wraps an http.RoundTripper to sign requests with AWS SigV4.
+// This runs after the director has rewritten the URL, so the signature covers
+// the final destination host/path.
+type awsSignTransport struct {
+	base   http.RoundTripper
+	signer *awssign.Signer
+}
+
+func (t *awsSignTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := t.signer.Sign(req); err != nil {
+		return nil, fmt.Errorf("aws sigv4 sign: %w", err)
+	}
+	return t.base.RoundTrip(req)
 }
