@@ -57,6 +57,36 @@ providers:
       interval: 30s
       timeout: 5s
 
+  # --- OAuth2 examples (uncomment to use) ---
+
+  # Baidu Wenxin (ERNIE) — uses client credentials OAuth2
+  # - name: baidu
+  #   upstream: https://aip.baidubce.com
+  #   auth:
+  #     type: oauth2-client-credentials
+  #     token_url: https://aip.baidubce.com/oauth/2.0/token
+  #     client_id: your-api-key
+  #     client_secret: your-secret-key
+  #   health_check:
+  #     method: GET
+  #     path: /rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completions
+  #     interval: 60s
+  #     timeout: 5s
+
+  # Google Vertex AI — uses GCP service account OAuth2
+  # - name: vertex
+  #   upstream: https://us-central1-aiplatform.googleapis.com
+  #   auth:
+  #     type: oauth2-service-account
+  #     credentials_file: /path/to/service-account.json
+  #     scopes:
+  #       - https://www.googleapis.com/auth/cloud-platform
+  #   health_check:
+  #     method: GET
+  #     path: /v1/projects/your-project/locations/us-central1/publishers/google/models
+  #     interval: 60s
+  #     timeout: 5s
+
 fallback:
   groups:
     - name: openai-compat

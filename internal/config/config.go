@@ -45,9 +45,14 @@ type AuthConfig struct {
 }
 
 type ProviderAuth struct {
-	Type      string `yaml:"type"`       // "bearer", "x-api-key", "query-param", "none"
-	Key       string `yaml:"key"`
-	ParamName string `yaml:"param_name"` // for query-param auth, e.g. "key"
+	Type            string `yaml:"type"`             // "bearer", "x-api-key", "query-param", "oauth2-client-credentials", "oauth2-service-account", "none"
+	Key             string `yaml:"key"`
+	ParamName       string `yaml:"param_name"`       // for query-param auth, e.g. "key"
+	TokenURL        string `yaml:"token_url"`        // for oauth2-client-credentials
+	ClientID        string `yaml:"client_id"`        // for oauth2-client-credentials
+	ClientSecret    string `yaml:"client_secret"`    // for oauth2-client-credentials
+	CredentialsFile string `yaml:"credentials_file"` // for oauth2-service-account (GCP JSON path)
+	Scopes          []string `yaml:"scopes"`         // for oauth2-service-account
 }
 
 type HealthCheckConfig struct {
@@ -121,10 +126,12 @@ func applyDefaults(cfg *Config) {
 }
 
 var validAuthTypes = map[string]bool{
-	"bearer":      true,
-	"x-api-key":   true,
-	"query-param": true,
-	"none":        true,
+	"bearer":                     true,
+	"x-api-key":                  true,
+	"query-param":                true,
+	"oauth2-client-credentials":  true,
+	"oauth2-service-account":     true,
+	"none":                       true,
 }
 
 func validate(cfg *Config) error {
@@ -149,10 +156,26 @@ func validate(cfg *Config) error {
 			return fmt.Errorf("providers[%d] %q: upstream is required", i, p.Name)
 		}
 		if !validAuthTypes[p.Auth.Type] {
-			return fmt.Errorf("providers[%d] %q: invalid auth type %q (valid: bearer, x-api-key, query-param, none)", i, p.Name, p.Auth.Type)
+			return fmt.Errorf("providers[%d] %q: invalid auth type %q (valid: bearer, x-api-key, query-param, oauth2-client-credentials, oauth2-service-account, none)", i, p.Name, p.Auth.Type)
 		}
 		if p.Auth.Type == "query-param" && p.Auth.ParamName == "" {
 			return fmt.Errorf("providers[%d] %q: auth type query-param requires param_name", i, p.Name)
+		}
+		if p.Auth.Type == "oauth2-client-credentials" {
+			if p.Auth.TokenURL == "" {
+				return fmt.Errorf("providers[%d] %q: auth type oauth2-client-credentials requires token_url", i, p.Name)
+			}
+			if p.Auth.ClientID == "" {
+				return fmt.Errorf("providers[%d] %q: auth type oauth2-client-credentials requires client_id", i, p.Name)
+			}
+			if p.Auth.ClientSecret == "" {
+				return fmt.Errorf("providers[%d] %q: auth type oauth2-client-credentials requires client_secret", i, p.Name)
+			}
+		}
+		if p.Auth.Type == "oauth2-service-account" {
+			if p.Auth.CredentialsFile == "" {
+				return fmt.Errorf("providers[%d] %q: auth type oauth2-service-account requires credentials_file", i, p.Name)
+			}
 		}
 		providerNames[p.Name] = true
 	}

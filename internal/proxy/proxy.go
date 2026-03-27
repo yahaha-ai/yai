@@ -2,13 +2,20 @@ package proxy
 
 import (
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/yahaha-ai/yai/internal/config"
+	"github.com/yahaha-ai/yai/internal/oauth2"
 )
+
+// TokenSource provides dynamic access tokens for oauth2 auth types.
+type TokenSource = oauth2.TokenSource
 
 // Proxy is an HTTP handler that routes /proxy/{provider}/... to the configured upstream.
 type Proxy struct {
@@ -16,13 +23,36 @@ type Proxy struct {
 }
 
 type providerProxy struct {
-	config config.ProviderConfig
-	target *url.URL
-	proxy  *httputil.ReverseProxy
+	config      config.ProviderConfig
+	target      *url.URL
+	proxy       *httputil.ReverseProxy
+	tokenSource TokenSource // non-nil for oauth2 auth types
+}
+
+// Option configures Proxy creation.
+type Option func(*options)
+
+type options struct {
+	tokenSources map[string]TokenSource // provider name -> token source override
+}
+
+// WithTokenSource overrides the TokenSource for a specific provider (for testing).
+func WithTokenSource(providerName string, ts TokenSource) Option {
+	return func(o *options) {
+		if o.tokenSources == nil {
+			o.tokenSources = make(map[string]TokenSource)
+		}
+		o.tokenSources[providerName] = ts
+	}
 }
 
 // New creates a Proxy from provider configs.
-func New(providers []config.ProviderConfig) *Proxy {
+func New(providers []config.ProviderConfig, opts ...Option) *Proxy {
+	o := &options{}
+	for _, opt := range opts {
+		opt(o)
+	}
+
 	p := &Proxy{
 		providers: make(map[string]*providerProxy),
 	}
@@ -35,6 +65,19 @@ func New(providers []config.ProviderConfig) *Proxy {
 			config: cfg,
 			target: target,
 		}
+
+		// Set up token source for oauth2 types
+		if ts, ok := o.tokenSources[cfg.Name]; ok {
+			pp.tokenSource = ts
+		} else {
+			ts, err := createTokenSource(cfg)
+			if err != nil {
+				log.Printf("WARN: provider %q: failed to create token source: %v", cfg.Name, err)
+				continue
+			}
+			pp.tokenSource = ts // may be nil for non-oauth2 types
+		}
+
 		rp := &httputil.ReverseProxy{
 			Director:      pp.director,
 			FlushInterval: -1,
@@ -43,6 +86,36 @@ func New(providers []config.ProviderConfig) *Proxy {
 		p.providers[cfg.Name] = pp
 	}
 	return p
+}
+
+// createTokenSource creates a TokenSource based on provider auth config.
+// Returns nil for non-oauth2 auth types.
+func createTokenSource(cfg config.ProviderConfig) (TokenSource, error) {
+	switch cfg.Auth.Type {
+	case "oauth2-client-credentials":
+		return oauth2.NewClientCredentialsSource(oauth2.ClientCredentialsConfig{
+			TokenURL:     cfg.Auth.TokenURL,
+			ClientID:     cfg.Auth.ClientID,
+			ClientSecret: cfg.Auth.ClientSecret,
+		}), nil
+
+	case "oauth2-service-account":
+		data, err := os.ReadFile(cfg.Auth.CredentialsFile)
+		if err != nil {
+			return nil, fmt.Errorf("read credentials file %q: %w", cfg.Auth.CredentialsFile, err)
+		}
+		scopes := cfg.Auth.Scopes
+		if len(scopes) == 0 {
+			scopes = []string{"https://www.googleapis.com/auth/cloud-platform"}
+		}
+		return oauth2.NewServiceAccountSource(oauth2.ServiceAccountConfig{
+			CredentialsJSON: data,
+			Scopes:          scopes,
+		})
+
+	default:
+		return nil, nil
+	}
 }
 
 // director rewrites the request: sets target host/scheme, strips client auth, injects real key.
@@ -65,6 +138,16 @@ func (pp *providerProxy) director(req *http.Request) {
 		q := req.URL.Query()
 		q.Set(pp.config.Auth.ParamName, pp.config.Auth.Key)
 		req.URL.RawQuery = q.Encode()
+	case "oauth2-client-credentials", "oauth2-service-account":
+		if pp.tokenSource != nil {
+			token, err := pp.tokenSource.Token()
+			if err != nil {
+				log.Printf("ERROR: provider %q: oauth2 token refresh failed: %v", pp.config.Name, err)
+				// Request will likely fail upstream, but we don't abort in director
+			} else {
+				req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+			}
+		}
 	case "none":
 		// no auth header
 	}

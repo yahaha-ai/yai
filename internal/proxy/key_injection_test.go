@@ -1,13 +1,16 @@
 package proxy
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/yahaha-ai/yai/internal/config"
+	"github.com/yahaha-ai/yai/internal/oauth2"
 )
 
 // headerCapture is a test server that records all received headers.
@@ -310,5 +313,167 @@ func TestKeyInjection_QueryParamPreservesExistingParams(t *testing.T) {
 	}
 	if got := qc.Query["alt"]; got != "sse" {
 		t.Errorf("query param alt = %q, want %q (should preserve existing params)", got, "sse")
+	}
+}
+
+// --- OAuth2 key injection tests ---
+
+// staticTokenSource returns a fixed token (for testing).
+type staticTokenSource struct {
+	token *oauth2.Token
+	err   error
+}
+
+func (s *staticTokenSource) Token() (*oauth2.Token, error) {
+	return s.token, s.err
+}
+
+func TestKeyInjection_OAuth2ClientCredentials(t *testing.T) {
+	hc := newHeaderCaptureServer()
+	defer hc.Server.Close()
+
+	providers := []config.ProviderConfig{
+		{
+			Name:     "baidu",
+			Upstream: hc.Server.URL,
+			Auth: config.ProviderAuth{
+				Type:         "oauth2-client-credentials",
+				TokenURL:     "http://fake.example.com/token",
+				ClientID:     "test-id",
+				ClientSecret: "test-secret",
+			},
+		},
+	}
+
+	ts := &staticTokenSource{
+		token: &oauth2.Token{
+			AccessToken: "baidu-dynamic-token-789",
+			ExpiresAt:   time.Now().Add(time.Hour),
+		},
+	}
+
+	p := New(providers, WithTokenSource("baidu", ts))
+	req := httptest.NewRequest("POST", "/proxy/baidu/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completions", strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer yai_xxx")
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != 200 {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	// Should inject dynamic bearer token from TokenSource
+	if got := hc.Get("Authorization"); got != "Bearer baidu-dynamic-token-789" {
+		t.Errorf("Authorization = %q, want Bearer baidu-dynamic-token-789", got)
+	}
+}
+
+func TestKeyInjection_OAuth2ServiceAccount(t *testing.T) {
+	hc := newHeaderCaptureServer()
+	defer hc.Server.Close()
+
+	providers := []config.ProviderConfig{
+		{
+			Name:     "vertex",
+			Upstream: hc.Server.URL,
+			Auth: config.ProviderAuth{
+				Type:            "oauth2-service-account",
+				CredentialsFile: "/tmp/nonexistent.json",
+				Scopes:          []string{"https://www.googleapis.com/auth/cloud-platform"},
+			},
+		},
+	}
+
+	ts := &staticTokenSource{
+		token: &oauth2.Token{
+			AccessToken: "vertex-sa-token-456",
+			ExpiresAt:   time.Now().Add(time.Hour),
+		},
+	}
+
+	p := New(providers, WithTokenSource("vertex", ts))
+	req := httptest.NewRequest("POST", "/proxy/vertex/v1/projects/my-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent", strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer yai_xxx")
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != 200 {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	if got := hc.Get("Authorization"); got != "Bearer vertex-sa-token-456" {
+		t.Errorf("Authorization = %q, want Bearer vertex-sa-token-456", got)
+	}
+}
+
+func TestKeyInjection_OAuth2StripsClientAuth(t *testing.T) {
+	hc := newHeaderCaptureServer()
+	defer hc.Server.Close()
+
+	providers := []config.ProviderConfig{
+		{
+			Name:     "vertex",
+			Upstream: hc.Server.URL,
+			Auth: config.ProviderAuth{
+				Type:            "oauth2-service-account",
+				CredentialsFile: "/tmp/nonexistent.json",
+			},
+		},
+	}
+
+	ts := &staticTokenSource{
+		token: &oauth2.Token{
+			AccessToken: "real-token",
+			ExpiresAt:   time.Now().Add(time.Hour),
+		},
+	}
+
+	p := New(providers, WithTokenSource("vertex", ts))
+	req := httptest.NewRequest("POST", "/proxy/vertex/v1/chat", strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer yai_should_be_stripped")
+	req.Header.Set("X-Api-Key", "should-also-be-stripped")
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+
+	// Real token should replace client auth
+	if got := hc.Get("Authorization"); got != "Bearer real-token" {
+		t.Errorf("Authorization = %q, want Bearer real-token", got)
+	}
+	// X-Api-Key should be stripped
+	if hc.Has("X-Api-Key") {
+		t.Errorf("X-Api-Key should be stripped, got %q", hc.Get("X-Api-Key"))
+	}
+}
+
+func TestKeyInjection_OAuth2TokenError(t *testing.T) {
+	hc := newHeaderCaptureServer()
+	defer hc.Server.Close()
+
+	providers := []config.ProviderConfig{
+		{
+			Name:     "broken",
+			Upstream: hc.Server.URL,
+			Auth: config.ProviderAuth{
+				Type:         "oauth2-client-credentials",
+				TokenURL:     "http://fake.example.com/token",
+				ClientID:     "id",
+				ClientSecret: "secret",
+			},
+		},
+	}
+
+	ts := &staticTokenSource{
+		err: fmt.Errorf("token refresh failed"),
+	}
+
+	p := New(providers, WithTokenSource("broken", ts))
+	req := httptest.NewRequest("POST", "/proxy/broken/v1/chat", strings.NewReader("{}"))
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+
+	// Request still goes through (upstream will likely reject it)
+	// No Authorization header should be set
+	if hc.Has("Authorization") {
+		t.Errorf("Authorization should not be set when token refresh fails, got %q", hc.Get("Authorization"))
 	}
 }
