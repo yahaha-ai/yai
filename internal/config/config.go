@@ -33,8 +33,9 @@ func (d Duration) MarshalYAML() (interface{}, error) {
 }
 
 type ServerConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Host            string   `yaml:"host"`
+	Port            int      `yaml:"port"`
+	ShutdownTimeout Duration `yaml:"shutdown_timeout"` // graceful shutdown timeout (default: 30s)
 }
 
 type TokenEntry struct {
