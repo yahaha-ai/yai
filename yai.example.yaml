@@ -17,6 +17,7 @@ auth:
   tokens:
     - name: cicada-main
       token: ${YAI_AUTH_TOKEN:-changeme}
+      rate_limit: 60/min    # optional: requests per window (e.g. 60/min, 1000/hour, 10/s)
 
 providers:
   - name: anthropic
