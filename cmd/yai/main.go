@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/yahaha-ai/yai/internal/auth"
 	"github.com/yahaha-ai/yai/internal/config"
@@ -72,7 +76,35 @@ func main() {
 	log.Printf("  fallback groups: %d", len(cfg.Fallback.Groups))
 	log.Printf("  auth tokens: %d", len(cfg.Auth.Tokens))
 
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	server := &http.Server{
+		Addr:    addr,
+		Handler: mux,
+	}
+
+	// Graceful shutdown on SIGINT/SIGTERM
+	done := make(chan struct{})
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		sig := <-sigCh
+		log.Printf("received %v, shutting down gracefully...", sig)
+
+		timeout := 30 * time.Second
+		if cfg.Server.ShutdownTimeout.Duration > 0 {
+			timeout = cfg.Server.ShutdownTimeout.Duration
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("shutdown error: %v", err)
+		}
+		close(done)
+	}()
+
+	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
 	}
+	<-done
+	log.Printf("yai stopped")
 }
