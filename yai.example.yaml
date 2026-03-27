@@ -1,5 +1,13 @@
 # yai configuration
 # Copy this file to yai.yaml and fill in your real keys.
+#
+# Environment variable expansion:
+#   ${VAR}            — replaced with the value of $VAR (empty string if unset)
+#   ${VAR:-default}   — replaced with $VAR, or "default" if unset/empty
+#
+# Example: keep secrets out of this file
+#   key: ${YAI_ANTHROPIC_KEY}
+# Then: export YAI_ANTHROPIC_KEY=sk-ant-xxx && ./yai
 
 server:
   host: 0.0.0.0
@@ -8,14 +16,14 @@ server:
 auth:
   tokens:
     - name: cicada-main
-      token: yai_change_me
+      token: ${YAI_AUTH_TOKEN:-changeme}
 
 providers:
   - name: anthropic
     upstream: https://api.anthropic.com
     auth:
       type: x-api-key
-      key: sk-ant-api03-change-me
+      key: ${YAI_ANTHROPIC_KEY}
     extra_headers:
       anthropic-version: "2023-06-01"
     health_check:
@@ -28,7 +36,7 @@ providers:
     upstream: https://api.deepseek.com
     auth:
       type: bearer
-      key: sk-deepseek-change-me
+      key: ${YAI_DEEPSEEK_KEY}
     health_check:
       method: GET
       path: /v1/models
@@ -49,7 +57,7 @@ providers:
     upstream: https://generativelanguage.googleapis.com
     auth:
       type: query-param
-      key: AIzaSy-change-me
+      key: ${YAI_GEMINI_KEY}
       param_name: key
     health_check:
       method: GET
@@ -65,8 +73,8 @@ providers:
   #   auth:
   #     type: oauth2-client-credentials
   #     token_url: https://aip.baidubce.com/oauth/2.0/token
-  #     client_id: your-api-key
-  #     client_secret: your-secret-key
+  #     client_id: ${YAI_BAIDU_CLIENT_ID}
+  #     client_secret: ${YAI_BAIDU_CLIENT_SECRET}
   #   health_check:
   #     method: GET
   #     path: /rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completions
@@ -92,9 +100,9 @@ providers:
   #   upstream: https://your-instance.openai.azure.com
   #   auth:
   #     type: oauth2-azure-ad
-  #     tenant_id: 00001111-aaaa-2222-bbbb-3333cccc4444
-  #     client_id: your-app-client-id
-  #     client_secret: your-app-client-secret
+  #     tenant_id: ${YAI_AZURE_TENANT_ID}
+  #     client_id: ${YAI_AZURE_CLIENT_ID}
+  #     client_secret: ${YAI_AZURE_CLIENT_SECRET}
   #     # scopes:  # optional, defaults to https://cognitiveservices.azure.com/.default
   #     #   - https://cognitiveservices.azure.com/.default
   #   health_check:

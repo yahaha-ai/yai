@@ -657,3 +657,139 @@ providers:
 		t.Errorf("error = %q", err.Error())
 	}
 }
+
+func TestExpandEnvSimple(t *testing.T) {
+	t.Setenv("YAI_TEST_KEY", "sk-secret-123")
+
+	yaml := `
+server:
+  port: 8080
+auth:
+  tokens:
+    - name: test
+      token: test-token
+providers:
+  - name: anthropic
+    upstream: https://api.anthropic.com
+    auth:
+      type: x-api-key
+      key: ${YAI_TEST_KEY}
+    health_check:
+      path: /v1/models
+`
+	cfg, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if cfg.Providers[0].Auth.Key != "sk-secret-123" {
+		t.Errorf("key = %q, want %q", cfg.Providers[0].Auth.Key, "sk-secret-123")
+	}
+}
+
+func TestExpandEnvWithDefault(t *testing.T) {
+	// Make sure env var is NOT set
+	t.Setenv("YAI_UNSET_VAR_12345", "")
+
+	yaml := `
+server:
+  port: 8080
+auth:
+  tokens:
+    - name: test
+      token: test-token
+providers:
+  - name: anthropic
+    upstream: https://api.anthropic.com
+    auth:
+      type: x-api-key
+      key: ${YAI_UNSET_VAR_12345:-fallback-key}
+    health_check:
+      path: /v1/models
+`
+	cfg, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if cfg.Providers[0].Auth.Key != "fallback-key" {
+		t.Errorf("key = %q, want %q", cfg.Providers[0].Auth.Key, "fallback-key")
+	}
+}
+
+func TestExpandEnvOverridesDefault(t *testing.T) {
+	t.Setenv("YAI_REAL_KEY", "real-value")
+
+	yaml := `
+server:
+  port: 8080
+auth:
+  tokens:
+    - name: test
+      token: test-token
+providers:
+  - name: anthropic
+    upstream: https://api.anthropic.com
+    auth:
+      type: x-api-key
+      key: ${YAI_REAL_KEY:-fallback}
+    health_check:
+      path: /v1/models
+`
+	cfg, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if cfg.Providers[0].Auth.Key != "real-value" {
+		t.Errorf("key = %q, want %q", cfg.Providers[0].Auth.Key, "real-value")
+	}
+}
+
+func TestExpandEnvMultipleVars(t *testing.T) {
+	t.Setenv("YAI_TOKEN", "my-token")
+	t.Setenv("YAI_ANT_KEY", "sk-ant-xxx")
+
+	yaml := `
+server:
+  port: 8080
+auth:
+  tokens:
+    - name: test
+      token: ${YAI_TOKEN}
+providers:
+  - name: anthropic
+    upstream: https://api.anthropic.com
+    auth:
+      type: x-api-key
+      key: ${YAI_ANT_KEY}
+    health_check:
+      path: /v1/models
+`
+	cfg, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if cfg.Auth.Tokens[0].Token != "my-token" {
+		t.Errorf("token = %q, want %q", cfg.Auth.Tokens[0].Token, "my-token")
+	}
+	if cfg.Providers[0].Auth.Key != "sk-ant-xxx" {
+		t.Errorf("key = %q, want %q", cfg.Providers[0].Auth.Key, "sk-ant-xxx")
+	}
+}
+
+func TestExpandEnvUnsetNoDefault(t *testing.T) {
+	// ${UNSET_VAR} with no default should resolve to empty string
+	t.Setenv("YAI_MISSING_VAR_99999", "")
+
+	result := expandEnv("prefix-${YAI_MISSING_VAR_99999}-suffix")
+	if result != "prefix--suffix" {
+		t.Errorf("got %q, want %q", result, "prefix--suffix")
+	}
+}
+
+func TestExpandEnvNoVars(t *testing.T) {
+	// Plain text should pass through unchanged
+	input := "just a regular string with no vars"
+	result := expandEnv(input)
+	if result != input {
+		t.Errorf("got %q, want %q", result, input)
+	}
+}
