@@ -91,7 +91,7 @@ func TestIntegration_HealthEndpoint(t *testing.T) {
 	}
 
 	var statuses map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&statuses)
+	_ = json.NewDecoder(resp.Body).Decode(&statuses)
 	if _, ok := statuses["mock"]; !ok {
 		t.Error("health response should contain 'mock' provider")
 	}
@@ -133,7 +133,7 @@ func TestIntegration_ProxyWithAuth(t *testing.T) {
 	}
 
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	_ = json.NewDecoder(resp.Body).Decode(&result)
 	if result["content"] == nil {
 		t.Error("expected content in response")
 	}

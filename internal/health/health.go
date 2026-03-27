@@ -23,7 +23,6 @@ type Checker struct {
 	statuses  map[string]*ProviderStatus
 	mu        sync.RWMutex
 	cancel    context.CancelFunc
-	client    *http.Client
 }
 
 // New creates a Checker for the given providers.

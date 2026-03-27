@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -44,22 +43,6 @@ func newMockSSEUpstream(events []string, delay time.Duration) *httptest.Server {
 			}
 		}
 	}))
-}
-
-// newHeaderCapture creates a test server that captures received headers.
-func newHeaderCapture() (*httptest.Server, *http.Header) {
-	var mu sync.Mutex
-	captured := make(http.Header)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		for k, v := range r.Header {
-			captured[k] = v
-		}
-		mu.Unlock()
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
-	}))
-	return srv, &captured
 }
 
 func makeProviders(upstreams map[string]string) []config.ProviderConfig {
@@ -223,7 +206,7 @@ func TestClientDisconnectCancelsUpstream(t *testing.T) {
 	}
 	// Read the first event then close
 	buf := make([]byte, 256)
-	resp.Body.Read(buf)
+	_, _ = resp.Body.Read(buf)
 	resp.Body.Close()
 
 	select {

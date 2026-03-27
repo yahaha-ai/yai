@@ -51,7 +51,7 @@ func main() {
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		statuses := checker.AllStatuses()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(statuses)
+		_ = json.NewEncoder(w).Encode(statuses)
 	})
 
 	// Proxy routes (auth required)

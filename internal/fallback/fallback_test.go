@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,7 +34,7 @@ func setupTestEnv(t *testing.T, behaviors map[string]struct {
 				time.Sleep(b.delay)
 			}
 			w.WriteHeader(b.status)
-			w.Write([]byte(b.body))
+			_, _ = w.Write([]byte(b.body))
 		}))
 		upstreams = append(upstreams, srv)
 		providers = append(providers, config.ProviderConfig{
@@ -275,20 +276,20 @@ func TestNoFallbackGroupConfigured(t *testing.T) {
 
 func TestRequestBodyAvailableForRetry(t *testing.T) {
 	// Verify that request body is buffered so it can be sent to fallback provider
-	var secondBody string
-	callCount := 0
+	var secondBody atomic.Value
+	var callCount atomic.Int32
 
 	srvA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount++
+		callCount.Add(1)
 		w.WriteHeader(503)
 	}))
 	defer srvA.Close()
 
 	srvB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
-		secondBody = string(b)
+		secondBody.Store(string(b))
 		w.WriteHeader(200)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
 	defer srvB.Close()
 
@@ -336,7 +337,8 @@ func TestRequestBodyAvailableForRetry(t *testing.T) {
 	if rr.Code != 200 {
 		t.Errorf("status = %d, want 200", rr.Code)
 	}
-	if secondBody != body {
-		t.Errorf("fallback body = %q, want %q", secondBody, body)
+	got, _ := secondBody.Load().(string)
+	if got != body {
+		t.Errorf("fallback body = %q, want %q", got, body)
 	}
 }

@@ -3,6 +3,7 @@ package health
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -96,9 +97,10 @@ func TestUnreachableUpstream(t *testing.T) {
 }
 
 func TestRecovery(t *testing.T) {
-	healthy := true
+	var healthy atomic.Bool
+	healthy.Store(true)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if healthy {
+		if healthy.Load() {
 			w.WriteHeader(200)
 		} else {
 			w.WriteHeader(500)
@@ -128,14 +130,14 @@ func TestRecovery(t *testing.T) {
 	}
 
 	// Go unhealthy
-	healthy = false
+	healthy.Store(false)
 	time.Sleep(200 * time.Millisecond)
 	if checker.Status("test").Healthy {
 		t.Fatal("expected unhealthy after 500s")
 	}
 
 	// Recover
-	healthy = true
+	healthy.Store(true)
 	time.Sleep(200 * time.Millisecond)
 	if !checker.Status("test").Healthy {
 		t.Fatal("expected recovery after going back to 200")
@@ -233,9 +235,9 @@ func TestIsHealthy(t *testing.T) {
 }
 
 func TestHealthCheckPath(t *testing.T) {
-	var receivedPath string
+	var receivedPath atomic.Value
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedPath = r.URL.Path
+		receivedPath.Store(r.URL.Path)
 		w.WriteHeader(200)
 	}))
 	defer upstream.Close()
@@ -257,7 +259,8 @@ func TestHealthCheckPath(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	if receivedPath != "/v1/models" {
-		t.Errorf("health check path = %q, want %q", receivedPath, "/v1/models")
+	got, _ := receivedPath.Load().(string)
+	if got != "/v1/models" {
+		t.Errorf("health check path = %q, want %q", got, "/v1/models")
 	}
 }
