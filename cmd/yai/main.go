@@ -15,9 +15,22 @@ import (
 	"github.com/yahaha-ai/yai/internal/server"
 )
 
+// Set by goreleaser ldflags
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	configPath := flag.String("config", "yai.yaml", "path to config file")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("yai %s (commit: %s, built: %s)\n", version, commit, date)
+		os.Exit(0)
+	}
 
 	// Load config
 	f, err := os.Open(*configPath)
