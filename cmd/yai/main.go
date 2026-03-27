@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -12,12 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/yahaha-ai/yai/internal/auth"
 	"github.com/yahaha-ai/yai/internal/config"
-	"github.com/yahaha-ai/yai/internal/fallback"
-	"github.com/yahaha-ai/yai/internal/health"
-	"github.com/yahaha-ai/yai/internal/proxy"
-	"github.com/yahaha-ai/yai/internal/ratelimit"
+	"github.com/yahaha-ai/yai/internal/server"
 )
 
 func main() {
@@ -35,40 +30,12 @@ func main() {
 		log.Fatalf("failed to parse config: %v", err)
 	}
 
-	// Build token map for auth (with optional rate limiters)
-	tokenMap := make(map[string]auth.TokenInfo)
-	for _, tok := range cfg.Auth.Tokens {
-		info := auth.TokenInfo{Name: tok.Name}
-		if tok.RateLimit != "" {
-			limit, err := ratelimit.ParseLimit(tok.RateLimit)
-			if err != nil {
-				log.Fatalf("auth token %q: invalid rate_limit: %v", tok.Name, err)
-			}
-			info.Limiter = ratelimit.NewLimiter(limit)
-		}
-		tokenMap[tok.Token] = info
+	// Initialize server with hot-reloadable components
+	srv, err := server.New(*configPath, cfg)
+	if err != nil {
+		log.Fatalf("failed to initialize server: %v", err)
 	}
-
-	// Initialize components
-	p := proxy.New(cfg.Providers)
-	checker := health.New(cfg.Providers)
-	checker.Start()
-	defer checker.Stop()
-
-	handler := fallback.New(p, checker, cfg.Fallback.Groups)
-
-	// Build router
-	mux := http.NewServeMux()
-
-	// Health endpoint (no auth)
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		statuses := checker.AllStatuses()
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(statuses)
-	})
-
-	// Proxy routes (auth required)
-	mux.Handle("/proxy/", auth.Middleware(tokenMap, handler))
+	defer srv.Stop()
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	log.Printf("yai listening on %s", addr)
@@ -76,33 +43,47 @@ func main() {
 	log.Printf("  fallback groups: %d", len(cfg.Fallback.Groups))
 	log.Printf("  auth tokens: %d", len(cfg.Auth.Tokens))
 
-	server := &http.Server{
+	httpServer := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: srv.Handler(),
 	}
 
-	// Graceful shutdown on SIGINT/SIGTERM
+	// Signal handling: SIGHUP for reload, SIGINT/SIGTERM for shutdown
 	done := make(chan struct{})
 	go func() {
 		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		sig := <-sigCh
-		log.Printf("received %v, shutting down gracefully...", sig)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
-		timeout := 30 * time.Second
-		if cfg.Server.ShutdownTimeout.Duration > 0 {
-			timeout = cfg.Server.ShutdownTimeout.Duration
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
+		for sig := range sigCh {
+			switch sig {
+			case syscall.SIGHUP:
+				log.Printf("received SIGHUP, reloading config...")
+				if err := srv.Reload(); err != nil {
+					log.Printf("config reload FAILED: %v (keeping previous config)", err)
+				} else {
+					log.Printf("config reloaded successfully")
+				}
 
-		if err := server.Shutdown(ctx); err != nil {
-			log.Printf("shutdown error: %v", err)
+			case syscall.SIGINT, syscall.SIGTERM:
+				log.Printf("received %v, shutting down gracefully...", sig)
+
+				timeout := 30 * time.Second
+				if cfg.Server.ShutdownTimeout.Duration > 0 {
+					timeout = cfg.Server.ShutdownTimeout.Duration
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), timeout)
+				defer cancel()
+
+				if err := httpServer.Shutdown(ctx); err != nil {
+					log.Printf("shutdown error: %v", err)
+				}
+				close(done)
+				return
+			}
 		}
-		close(done)
 	}()
 
-	if err := server.ListenAndServe(); err != http.ErrServerClosed {
+	if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
 	}
 	<-done

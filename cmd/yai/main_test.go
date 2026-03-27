@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/yahaha-ai/yai/internal/fallback"
 	"github.com/yahaha-ai/yai/internal/health"
 	"github.com/yahaha-ai/yai/internal/proxy"
+	"github.com/yahaha-ai/yai/internal/server"
 )
 
 // buildServer creates a full yai server with mock upstreams for integration testing.
@@ -43,6 +45,10 @@ func buildServer(t *testing.T) (*httptest.Server, func()) {
 				Interval: config.Duration{Duration: 50 * time.Millisecond},
 				Timeout:  config.Duration{Duration: 1 * time.Second},
 			},
+			Timeout: config.TimeoutConfig{
+				Connect: config.Duration{Duration: 10 * time.Second},
+				Read:    config.Duration{Duration: 300 * time.Second},
+			},
 		},
 	}
 
@@ -65,15 +71,15 @@ func buildServer(t *testing.T) (*httptest.Server, func()) {
 	})
 	mux.Handle("/proxy/", auth.Middleware(tokenMap, handler))
 
-	server := httptest.NewServer(mux)
+	srv := httptest.NewServer(mux)
 
 	cleanup := func() {
 		checker.Stop()
 		upstream.Close()
-		server.Close()
+		srv.Close()
 	}
 
-	return server, cleanup
+	return srv, cleanup
 }
 
 func TestIntegration_HealthEndpoint(t *testing.T) {
@@ -205,6 +211,10 @@ func TestIntegration_SSEStreaming(t *testing.T) {
 				Interval: config.Duration{Duration: 50 * time.Millisecond},
 				Timeout:  config.Duration{Duration: 1 * time.Second},
 			},
+			Timeout: config.TimeoutConfig{
+				Connect: config.Duration{Duration: 10 * time.Second},
+				Read:    config.Duration{Duration: 300 * time.Second},
+			},
 		},
 	}
 	tokenMap := map[string]auth.TokenInfo{"yai_test": {Name: "test"}}
@@ -218,10 +228,10 @@ func TestIntegration_SSEStreaming(t *testing.T) {
 	handler := fallback.New(p, checker, nil)
 	mux := http.NewServeMux()
 	mux.Handle("/proxy/", auth.Middleware(tokenMap, handler))
-	server := httptest.NewServer(mux)
-	defer server.Close()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
 
-	req, _ := http.NewRequest("POST", server.URL+"/proxy/sse-mock/v1/messages", strings.NewReader("{}"))
+	req, _ := http.NewRequest("POST", srv.URL+"/proxy/sse-mock/v1/messages", strings.NewReader("{}"))
 	req.Header.Set("Authorization", "Bearer yai_test")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -240,5 +250,214 @@ func TestIntegration_SSEStreaming(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "message_start") {
 		t.Error("response should contain SSE events")
+	}
+}
+
+func TestIntegration_HotReload(t *testing.T) {
+	// Create mock upstream
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"ok": "true"})
+	}))
+	defer upstream.Close()
+
+	// Write initial config to temp file
+	initialConfig := fmt.Sprintf(`
+server:
+  host: 127.0.0.1
+  port: 0
+auth:
+  tokens:
+    - name: test
+      token: yai_initial
+providers:
+  - name: mock
+    upstream: %s
+    auth:
+      type: none
+    health_check:
+      interval: 50ms
+      timeout: 1s
+`, upstream.URL)
+
+	tmpFile, err := os.CreateTemp("", "yai-test-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(initialConfig); err != nil {
+		t.Fatal(err)
+	}
+	tmpFile.Close()
+
+	// Parse initial config
+	f, _ := os.Open(tmpFile.Name())
+	cfg, err := config.Parse(f)
+	f.Close()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	// Create server
+	srv, err := server.New(tmpFile.Name(), cfg)
+	if err != nil {
+		t.Fatalf("server init: %v", err)
+	}
+	defer srv.Stop()
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Initial token works
+	req, _ := http.NewRequest("POST", ts.URL+"/proxy/mock/test", strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer yai_initial")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("initial request: status = %d, want 200", resp.StatusCode)
+	}
+
+	// Write updated config with a different token
+	updatedConfig := fmt.Sprintf(`
+server:
+  host: 127.0.0.1
+  port: 0
+auth:
+  tokens:
+    - name: test
+      token: yai_reloaded
+providers:
+  - name: mock
+    upstream: %s
+    auth:
+      type: none
+    health_check:
+      interval: 50ms
+      timeout: 1s
+`, upstream.URL)
+
+	if err := os.WriteFile(tmpFile.Name(), []byte(updatedConfig), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Trigger reload
+	if err := srv.Reload(); err != nil {
+		t.Fatalf("reload failed: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Old token should now fail
+	req, _ = http.NewRequest("POST", ts.URL+"/proxy/mock/test", strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer yai_initial")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Errorf("old token after reload: status = %d, want 401", resp.StatusCode)
+	}
+
+	// New token should work
+	req, _ = http.NewRequest("POST", ts.URL+"/proxy/mock/test", strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer yai_reloaded")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("new token after reload: status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestIntegration_HotReloadInvalidConfig(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"ok": "true"})
+	}))
+	defer upstream.Close()
+
+	initialConfig := fmt.Sprintf(`
+server:
+  host: 127.0.0.1
+  port: 0
+auth:
+  tokens:
+    - name: test
+      token: yai_ok
+providers:
+  - name: mock
+    upstream: %s
+    auth:
+      type: none
+    health_check:
+      interval: 50ms
+      timeout: 1s
+`, upstream.URL)
+
+	tmpFile, err := os.CreateTemp("", "yai-test-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(initialConfig); err != nil {
+		t.Fatal(err)
+	}
+	tmpFile.Close()
+
+	f, _ := os.Open(tmpFile.Name())
+	cfg, err := config.Parse(f)
+	f.Close()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	srv, err := server.New(tmpFile.Name(), cfg)
+	if err != nil {
+		t.Fatalf("server init: %v", err)
+	}
+	defer srv.Stop()
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Write invalid config (no tokens)
+	if err := os.WriteFile(tmpFile.Name(), []byte(`
+server:
+  port: 0
+auth:
+  tokens: []
+providers: []
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reload should fail
+	err = srv.Reload()
+	if err == nil {
+		t.Fatal("expected reload error for invalid config")
+	}
+
+	// Original token should still work (old config preserved)
+	req, _ := http.NewRequest("POST", ts.URL+"/proxy/mock/test", strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer yai_ok")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Errorf("after failed reload: status = %d, want 200 (old config should be preserved)", resp.StatusCode)
 	}
 }
