@@ -28,6 +28,9 @@ providers:
       key: ${YAI_ANTHROPIC_KEY}
     extra_headers:
       anthropic-version: "2023-06-01"
+    timeout:
+      connect: 5s            # TCP connect timeout (default: 10s)
+      read: 120s              # response timeout (default: 300s)
     health_check:
       method: GET
       path: /v1/models

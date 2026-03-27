@@ -885,3 +885,63 @@ providers:
 		t.Errorf("aws_region = %q", a.AWSRegion)
 	}
 }
+
+func TestTimeoutConfig(t *testing.T) {
+	yaml := `
+server:
+  port: 8080
+auth:
+  tokens:
+    - name: test
+      token: yai_xxx
+providers:
+  - name: anthropic
+    upstream: https://api.anthropic.com
+    auth:
+      type: x-api-key
+      key: xxx
+    timeout:
+      connect: 5s
+      read: 120s
+`
+	cfg, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := cfg.Providers[0]
+	if p.Timeout.Connect.String() != "5s" {
+		t.Errorf("connect timeout = %v, want 5s", p.Timeout.Connect)
+	}
+	if p.Timeout.Read.String() != "2m0s" {
+		t.Errorf("read timeout = %v, want 2m0s", p.Timeout.Read)
+	}
+}
+
+func TestTimeoutConfigDefaults(t *testing.T) {
+	yaml := `
+server:
+  port: 8080
+auth:
+  tokens:
+    - name: test
+      token: yai_xxx
+providers:
+  - name: ollama
+    upstream: http://localhost:11434
+    auth:
+      type: none
+`
+	cfg, err := Parse(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := cfg.Providers[0]
+	if p.Timeout.Connect.String() != "10s" {
+		t.Errorf("default connect timeout = %v, want 10s", p.Timeout.Connect)
+	}
+	if p.Timeout.Read.String() != "5m0s" {
+		t.Errorf("default read timeout = %v, want 5m0s", p.Timeout.Read)
+	}
+}

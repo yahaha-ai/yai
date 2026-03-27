@@ -72,12 +72,18 @@ type HealthCheckConfig struct {
 	Timeout  Duration `yaml:"timeout"`
 }
 
+type TimeoutConfig struct {
+	Connect Duration `yaml:"connect"` // TCP connect timeout (default: 10s)
+	Read    Duration `yaml:"read"`    // overall request timeout (default: 300s)
+}
+
 type ProviderConfig struct {
 	Name         string            `yaml:"name"`
 	Upstream     string            `yaml:"upstream"`
 	Auth         ProviderAuth      `yaml:"auth"`
 	ExtraHeaders map[string]string `yaml:"extra_headers"`
 	HealthCheck  HealthCheckConfig `yaml:"health_check"`
+	Timeout      TimeoutConfig     `yaml:"timeout"`
 }
 
 type RetryConfig struct {
@@ -158,6 +164,12 @@ func applyDefaults(cfg *Config) {
 		}
 		if p.HealthCheck.Timeout.Duration == 0 {
 			p.HealthCheck.Timeout.Duration = 5 * time.Second
+		}
+		if p.Timeout.Connect.Duration == 0 {
+			p.Timeout.Connect.Duration = 10 * time.Second
+		}
+		if p.Timeout.Read.Duration == 0 {
+			p.Timeout.Read.Duration = 300 * time.Second
 		}
 	}
 }
