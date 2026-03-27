@@ -45,8 +45,9 @@ type AuthConfig struct {
 }
 
 type ProviderAuth struct {
-	Type string `yaml:"type"` // "bearer", "x-api-key", "none"
-	Key  string `yaml:"key"`
+	Type      string `yaml:"type"`       // "bearer", "x-api-key", "query-param", "none"
+	Key       string `yaml:"key"`
+	ParamName string `yaml:"param_name"` // for query-param auth, e.g. "key"
 }
 
 type HealthCheckConfig struct {
@@ -120,9 +121,10 @@ func applyDefaults(cfg *Config) {
 }
 
 var validAuthTypes = map[string]bool{
-	"bearer":    true,
-	"x-api-key": true,
-	"none":      true,
+	"bearer":      true,
+	"x-api-key":   true,
+	"query-param": true,
+	"none":        true,
 }
 
 func validate(cfg *Config) error {
@@ -147,7 +149,10 @@ func validate(cfg *Config) error {
 			return fmt.Errorf("providers[%d] %q: upstream is required", i, p.Name)
 		}
 		if !validAuthTypes[p.Auth.Type] {
-			return fmt.Errorf("providers[%d] %q: invalid auth type %q (valid: bearer, x-api-key, none)", i, p.Name, p.Auth.Type)
+			return fmt.Errorf("providers[%d] %q: invalid auth type %q (valid: bearer, x-api-key, query-param, none)", i, p.Name, p.Auth.Type)
+		}
+		if p.Auth.Type == "query-param" && p.Auth.ParamName == "" {
+			return fmt.Errorf("providers[%d] %q: auth type query-param requires param_name", i, p.Name)
 		}
 		providerNames[p.Name] = true
 	}

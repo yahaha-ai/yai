@@ -45,6 +45,18 @@ providers:
       interval: 10s
       timeout: 2s
 
+  - name: gemini
+    upstream: https://generativelanguage.googleapis.com
+    auth:
+      type: query-param
+      key: AIzaSy-change-me
+      param_name: key
+    health_check:
+      method: GET
+      path: /v1beta/models
+      interval: 30s
+      timeout: 5s
+
 fallback:
   groups:
     - name: openai-compat

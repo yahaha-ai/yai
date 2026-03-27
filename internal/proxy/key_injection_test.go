@@ -196,3 +196,119 @@ func TestKeyInjection_ExtraHeaders(t *testing.T) {
 		t.Errorf("Anthropic-Beta = %q, want %q", got, "interleaved-thinking-2025-05-14")
 	}
 }
+
+// queryCapture records the query parameters received by the upstream.
+type queryCapture struct {
+	mu     sync.Mutex
+	Query  map[string]string
+	Server *httptest.Server
+}
+
+func newQueryCaptureServer() *queryCapture {
+	qc := &queryCapture{
+		Query: make(map[string]string),
+	}
+	qc.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		qc.mu.Lock()
+		for k, v := range r.URL.Query() {
+			if len(v) > 0 {
+				qc.Query[k] = v[0]
+			}
+		}
+		qc.mu.Unlock()
+		w.WriteHeader(200)
+		w.Write([]byte("ok"))
+	}))
+	return qc
+}
+
+func TestKeyInjection_QueryParam(t *testing.T) {
+	qc := newQueryCaptureServer()
+	defer qc.Server.Close()
+
+	providers := []config.ProviderConfig{
+		{
+			Name:     "gemini",
+			Upstream: qc.Server.URL,
+			Auth:     config.ProviderAuth{Type: "query-param", Key: "AIzaSyFAKEKEY", ParamName: "key"},
+		},
+	}
+
+	p := New(providers)
+	req := httptest.NewRequest("POST", "/proxy/gemini/v1beta/models/gemini-2.5-flash:generateContent", strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer yai_xxx")
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != 200 {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	qc.mu.Lock()
+	defer qc.mu.Unlock()
+
+	if got, ok := qc.Query["key"]; !ok || got != "AIzaSyFAKEKEY" {
+		t.Errorf("query param key = %q, want %q", got, "AIzaSyFAKEKEY")
+	}
+}
+
+func TestKeyInjection_QueryParamStripsAuthHeader(t *testing.T) {
+	hc := newHeaderCaptureServer()
+	defer hc.Server.Close()
+
+	providers := []config.ProviderConfig{
+		{
+			Name:     "gemini",
+			Upstream: hc.Server.URL,
+			Auth:     config.ProviderAuth{Type: "query-param", Key: "AIzaSyFAKEKEY", ParamName: "key"},
+		},
+	}
+
+	p := New(providers)
+	req := httptest.NewRequest("POST", "/proxy/gemini/v1beta/models/gemini-2.5-flash:generateContent", strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer yai_xxx")
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != 200 {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	// Should NOT forward any auth headers
+	if hc.Has("Authorization") {
+		t.Errorf("Authorization header should be stripped for query-param auth, got %q", hc.Get("Authorization"))
+	}
+}
+
+func TestKeyInjection_QueryParamPreservesExistingParams(t *testing.T) {
+	qc := newQueryCaptureServer()
+	defer qc.Server.Close()
+
+	providers := []config.ProviderConfig{
+		{
+			Name:     "gemini",
+			Upstream: qc.Server.URL,
+			Auth:     config.ProviderAuth{Type: "query-param", Key: "AIzaSyFAKEKEY", ParamName: "key"},
+		},
+	}
+
+	p := New(providers)
+	// Request with existing query param
+	req := httptest.NewRequest("POST", "/proxy/gemini/v1beta/models/gemini-2.5-flash:generateContent?alt=sse", strings.NewReader("{}"))
+	rr := httptest.NewRecorder()
+	p.ServeHTTP(rr, req)
+
+	if rr.Code != 200 {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	qc.mu.Lock()
+	defer qc.mu.Unlock()
+
+	if got := qc.Query["key"]; got != "AIzaSyFAKEKEY" {
+		t.Errorf("query param key = %q, want %q", got, "AIzaSyFAKEKEY")
+	}
+	if got := qc.Query["alt"]; got != "sse" {
+		t.Errorf("query param alt = %q, want %q (should preserve existing params)", got, "sse")
+	}
+}
